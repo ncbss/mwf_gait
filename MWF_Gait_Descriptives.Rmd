@@ -1,0 +1,276 @@
+---
+title: "MWF_Gait_Thickness_Descriptives"
+author: "Narlon Cassio"
+date: "21/04/2021"
+output: 
+  pdf_document: 
+    toc: yes
+    number_sections: yes
+    toc_depth: 5
+  word_document: 
+    toc: yes
+    toc_depth: 5
+geometry: "left = 1cm, right = 1cm, top = 1cm, bottom = 2.5cm"
+header-includes:
+- \usepackage{caption}
+- \usepackage{pdflscape}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+editor_options: 
+  chunk_output_type: console
+---
+
+\newpage
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  fig.height = 4, fig.width = 5, fig.align="center"
+)
+```
+\small
+# Loading packages
+```{r, }
+#------------------------------------------------------------------#
+# Loading packages                                              ####
+#------------------------------------------------------------------#
+library(tidyverse)
+library(tableone)
+library(gvlma)
+library(openxlsx)
+library(broom)
+library(psych)
+library(lsmeans)
+library(knitr)
+library(rstatix)
+library(performance)
+```
+
+# Loading data
+```{r, message = FALSE}
+#------------------------------------------------------------------#
+# Loading data                                                  ####
+#------------------------------------------------------------------#
+# Outcome and descriptive data
+all_data_clean <- read.xlsx("all_data_clean.xlsx") %>% 
+  filter(id != "RVCI_081") %>%  # Removing 2 RVCI subject without MWF data
+  filter(id != "RVCI_038")
+
+```
+# Data management
+## Checking data
+## Demographics 
+```{r, }
+# Checking variables
+## Continous demographics data
+kable(digits = 3, describe(all_data_clean[c("age",
+                                             "moca",
+                                             "mmse",
+                                             "height",
+                                             "weight",
+                                             "bmi")]))
+    ## Histograms
+    all_data_clean %>% 
+      select("id", "age", "moca", "mmse", "height", "weight", "bmi") %>% 
+      pivot_longer(values_to = "data", names_to = "measures", col = 2:7) %>% 
+      ggplot(aes(data, fill = measures)) +
+      geom_histogram(colour = "black", binwidth = function(x) 2 * IQR(x) / (length(x)^(1/3))) + 
+      facet_wrap(~measures, scales = "free")+
+      theme_minimal() +
+      theme(legend.position = "none")
+      
+
+    ## Normality tests
+    kable(digits = 2, caption = "Normality test", all_data_clean %>% 
+        shapiro_test(age, moca, mmse, height, weight, bmi))
+    
+## Converting Fazekas scores to character
+all_data_clean <- all_data_clean %>% 
+  mutate(fazekas_score = as.character(fazekas_score))
+
+## Categorical demographics data 
+kable(print(printToggle = FALSE, CreateTableOne(data = all_data_clean, c("sex", "fazekas_score", "education_r"))))
+kable(print(printToggle = FALSE, CreateTableOne(data = all_data_clean, 
+                                                c("fci_1_arthritis",
+                                                  "fci_2_osteoporosis",
+                                                  "fci_3_asthma",
+                                                  "fci_4_copd_ards_or_emphysema",
+                                                  "fci_5_angina",
+                                                  "fci_6_congestive_heart_failure_or_heart_disease",
+                                                  "fci_7_heart_attack_myocardial_infarct",
+                                                  "fci_8_neurological_disease",
+                                                  "fci_9_stroke_or_tia",
+                                                  "fci_10_peripheral_vascular_disease",
+                                                  "fci_11_diabetes_type_i_and_ii",
+                                                  "fci_12_upper_gastrointestinal_disease",
+                                                  "fci_13_depression",                                
+                                                  "fci_14_anxiety_or_panic_disorders",
+                                                  "fci_15_visual_impairment",
+                                                  "fci_16_hearing_impairment",
+                                                  "fci_17_degenerative_disc_disease",
+                                                  "fci_18_obesity_and_or_body_mass_index_30",
+                                                  "fci_19_thyroid_disease",
+                                                  "fci_20_cancer",
+                                                  "fci_21_hypertension",
+                                                  "fci_total"))))
+## Total Functional commorbidity index
+kable(digits = 2, describe(all_data_clean[c("fci_total")], fast = TRUE, IQR = TRUE))
+
+```
+
+### Gait data
+```{r, }
+# Checking variables
+# Distance, ambulation time, velocity, step count, cadence, double support time
+kable(digits = 3, describe(all_data_clean[c("velocity_ST",
+                                           "step_length_avg_ST",
+                                           "cycle_time_avg_ST",
+                                           "stride_time_sd_avg_ST",
+                                           "cycle_time_cov_ST",
+                                           "leg_length")]))
+    ## Histograms
+    all_data_clean %>% 
+      select("id", "velocity_ST", "step_length_avg_ST", "cycle_time_avg_ST", "stride_time_sd_avg_ST", "cycle_time_cov_ST", "leg_length") %>% 
+      pivot_longer(values_to = "data", names_to = "measures", col = 2:7) %>% 
+      ggplot(aes(data, fill = measures)) +
+      geom_histogram(colour = "black", binwidth = function(x) 2 * IQR(x) / (length(x)^(1/3))) + 
+      facet_wrap(~measures, scales = "free")+
+      theme_minimal() +
+      theme(legend.position = "none")
+    
+    ## Normality tests
+    kable(digits = 3, caption = "Normality test", all_data_clean %>% 
+        shapiro_test(velocity_ST,
+                     step_length_avg_ST,
+                     cycle_time_avg_ST,
+                     stride_time_sd_avg_ST,
+                     cycle_time_cov_ST,
+                     leg_length))
+    
+# Transforming non-normal variables of interest
+## Gait variability data
+    all_data_clean <- all_data_clean %>% 
+      mutate(cycle_time_cov_ST_lg = log1p(cycle_time_cov_ST))
+
+    ## Checking distributions
+    hist(all_data_clean$cycle_time_cov_ST_lg)
+    
+    ## Normality tests
+    kable(digits = 2, caption = "Normality test", all_data_clean %>% 
+            shapiro_test(cycle_time_cov_ST_lg))
+
+```
+
+### Myelin data
+```{r, fig.height=10, fig.width=7}
+# Checking variables
+# Means for MWF ROI and Whole-brain 
+kable(digits = 3, describe(all_data_clean[c("ALL_mean",
+                                           "Ant_CR_mean",
+                                           "Ant_IC_mean",
+                                           "BCC_mean",
+                                           "Cingulum_mean",
+                                           "Ext_Cap_mean",
+                                           "Fornix_mean",
+                                           "GCC_mean",
+                                           "Post_CR_mean",
+                                           "Post_IC_mean",
+                                           "Post_TR_mean",
+                                           "Retro_IC_mean",
+                                           "Sag_Strat_mean",
+                                           "SCC_mean",
+                                           "SLF_mean",
+                                           "Sup_CR_mean",
+                                           "MWF_TOT_WM_mean",
+                                           "Frontal_WM_all_mean",
+                                           "Parietal_WM_all_mean",
+                                           "eicv_cm3",
+                                           "wmh_cm3")]))
+    ## Histograms
+all_data_clean %>% 
+      select("id", "ALL_mean",
+             "Ant_CR_mean",
+             "Ant_IC_mean",
+             "BCC_mean",
+             "Cingulum_mean",
+             "Ext_Cap_mean",
+             "Fornix_mean",
+             "GCC_mean",
+             "Post_CR_mean",
+             "Post_IC_mean",
+             "Post_TR_mean",
+             "Retro_IC_mean",
+             "Sag_Strat_mean",
+             "SCC_mean",
+             "SLF_mean",
+             "Sup_CR_mean",
+             "MWF_TOT_WM_mean",
+             "Frontal_WM_all_mean",
+             "Parietal_WM_all_mean",
+             "eicv_cm3",
+             "wmh_cm3") %>% 
+      pivot_longer(values_to = "data", names_to = "measures", col = 2:22) %>% 
+      ggplot(aes(data, fill = measures)) +
+      geom_histogram(colour = "black", binwidth = function(x) 2 * IQR(x) / (length(x)^(1/3))) + 
+      facet_wrap(~measures, ncol = 3, scales = "free") +
+      theme_minimal() +
+      theme(legend.position = "none")
+    
+    ## Normality tests
+    kable(digits = 2, caption = "Normality test", all_data_clean %>%
+            shapiro_test(ALL_mean,
+                         Ant_CR_mean,
+                         Ant_IC_mean,
+                         BCC_mean,
+                         Cingulum_mean,
+                         Ext_Cap_mean,
+                         Fornix_mean,
+                         GCC_mean,
+                         Post_CR_mean,
+                         Post_IC_mean,
+                         Post_TR_mean,
+                         Retro_IC_mean,
+                         Sag_Strat_mean,
+                         SCC_mean,
+                         SLF_mean,
+                         Sup_CR_mean,
+                         MWF_TOT_WM_mean,
+                         Frontal_WM_all_mean,
+                         Parietal_WM_all_mean,
+                         eicv_cm3,
+                         wmh_cm3))
+```
+
+```{r}
+    # Transforming non-normal variables 
+    ## MWF data
+    all_data_clean <- all_data_clean %>% 
+      mutate(Ant_IC_mean = ifelse(Ant_IC_mean >= 0.21, NA, Ant_IC_mean), # Removing outlier in Anterior Internal capsule
+             BCC_mean_lg = log1p(BCC_mean), 
+             Ext_Cap_mean_lg = log1p(Ext_Cap_mean)) 
+    
+    ## WMH data
+    all_data_clean <- all_data_clean %>% 
+      mutate(wmh_cm3_lg = log1p(wmh_cm3))
+
+    ## Checking distributions
+    all_data_clean %>% 
+      select(id, Ant_IC_mean, BCC_mean_lg, Ext_Cap_mean_lg, wmh_cm3_lg) %>% 
+      pivot_longer(values_to = "data", names_to = "measures", col = 2:5) %>% 
+      ggplot(aes(data, fill = measures)) +
+      geom_histogram(colour = "black", binwidth = function(x) 2 * IQR(x) / (length(x)^(1/3))) + 
+      facet_wrap(~measures, scales = "free") +
+      theme_minimal() +
+      theme(legend.position = "none")
+    
+    ## Normality tests
+    kable(digits = 2, caption = "Normality test", all_data_clean %>%
+            shapiro_test(Ant_IC_mean,
+                         BCC_mean_lg,
+                         Ext_Cap_mean_lg,
+                         wmh_cm3_lg))
+```
+
+```{r, }
+# Saving final dataset
+write.xlsx(all_data_clean, "all_data_clean_final.xlsx")
+```

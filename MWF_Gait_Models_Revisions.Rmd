@@ -1,0 +1,853 @@
+---
+title: "MWF_GaitModels"
+author: "Narlon Cassio"
+date: "January 13, 2022"
+output: 
+  pdf_document: 
+    toc: yes
+    number_sections: yes
+    toc_depth: 5
+  word_document: 
+    toc: yes
+    toc_depth: 5
+geometry: "left = 1cm, right = 1cm, top = 1cm, bottom = 2.5cm"
+header-includes:
+- \usepackage{caption}
+- \usepackage{pdflscape}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+editor_options: 
+  chunk_output_type: console
+---
+
+\newpage
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  fig.height = 5, fig.width = 6, fig.align="center"
+)
+```
+
+\small
+
+# Loading packages
+
+```{r, }
+#------------------------------------------------------------------#
+# Loading packages                                              ####
+#------------------------------------------------------------------#
+library(tidyverse)
+library(tableone)
+library(gvlma)
+library(openxlsx)
+library(broom)
+library(psych)
+library(emmeans)
+library(knitr)
+library(rstatix)
+library(performance)
+library(lavaan)
+```
+
+# Loading data
+
+```{r, message = FALSE}
+#------------------------------------------------------------------#
+# Loading data                                                  ####
+#------------------------------------------------------------------#
+# Outcome and descriptive data
+all_data_clean <- read.xlsx("all_data_clean_final.xlsx")
+mwf_wm_eroded <- read.xlsx("mwf_merged_eroded.xlsx")
+
+## Adding eroded MWF data for whole-brain
+all_data_clean <- left_join(all_data_clean, mwf_wm_eroded)
+write.xlsx(all_data_clean, "all_data_clean_final.xlsx")
+
+```
+
+# Data analysis
+
+## Descriptives
+
+```{r, }
+# Demographics
+kable(digits = 2, caption = "Demographics",
+      describe(all_data_clean[c("age", 
+                                "height", 
+                                "weight",
+                                "overall_fall_risk_score")], fast = TRUE, IQR = TRUE))
+
+# Non-normal variables
+kable(print(printToggle = FALSE, CreateTableOne(data = all_data_clean, c("bmi", "moca", "mmse"), 
+                           includeNA = TRUE), nonnormal = c("bmi","moca", "mmse")))
+
+## Categorical demographics data 
+kable(print(printToggle = FALSE, CreateTableOne(data = all_data_clean, c("sex", "fazekas_score", "education_r"))))
+kable(print(printToggle = FALSE, 
+            CreateTableOne(data = all_data_clean, 
+            c("fci_1_arthritis",
+              "fci_2_osteoporosis",
+              "fci_3_asthma",
+              "fci_4_copd_ards_or_emphysema",
+              "fci_5_angina",
+              "fci_6_congestive_heart_failure_or_heart_disease",
+              "fci_7_heart_attack_myocardial_infarct",
+              "fci_8_neurological_disease",
+              "fci_9_stroke_or_tia",
+              "fci_10_peripheral_vascular_disease",
+              "fci_11_diabetes_type_i_and_ii",
+              "fci_12_upper_gastrointestinal_disease",
+              "fci_13_depression",                                
+              "fci_14_anxiety_or_panic_disorders",
+              "fci_15_visual_impairment",
+              "fci_16_hearing_impairment",
+              "fci_17_degenerative_disc_disease",
+              "fci_18_obesity_and_or_body_mass_index_30",
+              "fci_19_thyroid_disease",
+              "fci_20_cancer",
+              "fci_21_hypertension",
+              "fci_total")), noSpaces = TRUE))
+
+## Total Functional commorbidity index
+kable(print(printToggle = FALSE, CreateTableOne(data = all_data_clean, c("fci_total"), 
+                           includeNA = TRUE), nonnormal = c("fci_total")))
+
+# Myelin water fraction
+kable(digits = 3, caption = "Myelin water fraction",
+      describe(all_data_clean[c("MWF_TOT_WM_mean","MWF_TOT_WM_eroded_mean",
+                             "ALL_mean", 
+                             "Ant_CR_mean",
+                             "Post_CR_mean",
+                             "Sup_CR_mean",
+                             "BCC_mean",
+                             "GCC_mean",
+                             "SCC_mean",
+                             "Cingulum_mean", 
+                             "Ext_Cap_mean", 
+                             "Fornix_mean",
+                             "Sag_Strat_mean",
+                             "Ant_IC_mean",
+                             "Post_IC_mean", 
+                             "Retro_IC_mean",
+                             "Post_TR_mean",
+                             "SLF_mean",
+                             "Frontal_WM_all_mean",
+                             "Parietal_WM_all_mean")], fast = TRUE, IQR = TRUE))
+
+# Other structural data
+kable(print(printToggle = FALSE, CreateTableOne(data = all_data_clean, c("wmh_cm3", "wmh_cm3_lg","eicv_cm3"), 
+                           includeNA = TRUE), nonnormal = c("wmh_cm3")))
+
+# Gait measures  
+kable(digits = 3, caption = "Gait parameters",
+      describe(all_data_clean[c("velocity_ST", 
+                                "step_length_avg_ST", 
+                                "cycle_time_avg_ST", 
+                                "cycle_time_cov_ST",
+                                "cycle_time_cov_ST_lg")], fast = TRUE, IQR = TRUE))
+```
+
+### Comparing participants between studies
+
+```{r }
+all_data_clean <- all_data_clean %>% 
+  mutate(cohort = ifelse(str_detect(id, "FALLERS2_..."), "CogMob2", "RVCI"))
+
+kable(print(printToggle = FALSE, CreateTableOne(
+  data = all_data_clean, c(
+    "age","height", "weight",
+    "sex", "fazekas_score", "education_r",
+    "bmi", "moca", "mmse","fci_total",
+    "fci_1_arthritis",
+    "fci_2_osteoporosis",
+    "fci_3_asthma",
+    "fci_4_copd_ards_or_emphysema",
+    "fci_5_angina",
+    "fci_6_congestive_heart_failure_or_heart_disease",
+    "fci_7_heart_attack_myocardial_infarct",
+    "fci_8_neurological_disease",
+    "fci_9_stroke_or_tia",
+    "fci_10_peripheral_vascular_disease",
+    "fci_11_diabetes_type_i_and_ii",
+    "fci_12_upper_gastrointestinal_disease",
+    "fci_13_depression",                                
+    "fci_14_anxiety_or_panic_disorders",
+    "fci_15_visual_impairment",
+    "fci_16_hearing_impairment",
+    "fci_17_degenerative_disc_disease",
+    "fci_18_obesity_and_or_body_mass_index_30",
+    "fci_19_thyroid_disease",
+    "fci_20_cancer",
+    "fci_21_hypertension"), 
+  includeNA = TRUE, test = TRUE, strata = "cohort"), explain = TRUE, noSpaces = TRUE,
+  nonnormal = c("bmi", "moca", "mmse","fci_total")))
+
+```
+
+## Linear models
+
+```{r, }
+#------------------------------------------------------------------#
+# Regression models                                             ####
+#------------------------------------------------------------------#
+
+# Function to summarize lm output
+lm_results <- function(x) {
+  my_list <- list()
+  my_list$Summary <- (summary(x))
+  my_list$Assumtions <- (gvlma(x))
+  return(my_list)
+}
+
+# Creating contrasts for multi-level categorical variables
+all_data_clean <- within(all_data_clean, {
+  fazekas_c <- C(as.factor(fazekas_score), treatment, 2)
+  education_r_c <- C(as.factor(education_r), treatment, 3)
+  print(attributes(fazekas_c))
+  print(attributes(education_r_c))
+})
+  
+```
+
+\newpage
+
+### Unadjusted
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Select variable names for models
+predictor_var <- colnames(all_data_clean[c(41:58,136)])
+predictor_var %>% kable(col.names = "Predictor variables")
+
+# List to store models
+lm_var_mwf_1 = list()
+
+# Run models in loop script
+for (var in predictor_var){
+  # Formula
+  form <- paste("cycle_time_cov_ST_lg", "~", var)
+
+    # Print results to the list
+  lm_var_mwf_1[var] <- list(lm(form,
+          data = all_data_clean))
+}
+
+## Printing models
+for (model in lm_var_mwf_1){
+  print(formula(model), showEnv = FALSE)
+  print(lm_results(model))
+  print(check_model(model))
+}
+
+```
+
+### Adjusted
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Select variable names for models
+predictor_var <- colnames(all_data_clean[c(41:58,136)])
+predictor_var %>% kable(col.names = "Predictor variables")
+
+# List to store models
+lm_var_mwf_2 = list()
+
+# Run models in loop script
+for (var in predictor_var){
+  # Formula
+  form <- paste(
+    "cycle_time_cov_ST_lg", "~", var, 
+    "+ age + eicv_cm3 + sex + bmi + mmse") # Covariates
+
+    # Print results to the list
+  lm_var_mwf_2[var] <- list(lm(form,
+          data = all_data_clean))
+}
+
+## Printing models
+for (model in lm_var_mwf_2){
+  print(formula(model), showEnv = FALSE)
+  print(lm_results(model))
+  print(check_model(model))
+}
+
+```
+
+### Adjusted for WMH
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Select variable names for models
+predictor_var_wmh <- colnames(all_data_clean[c(43,44,48,54)])
+predictor_var_wmh %>% kable(col.names = "Predictor variables")
+
+# List to store models
+lm_var_mwf_3 = list()
+
+# Run models in loop script
+for (var in predictor_var_wmh){
+  # Formula
+  form <- paste(
+    "cycle_time_cov_ST_lg", "~", var, 
+    "+ age + eicv_cm3 + sex + bmi + mmse + wmh_cm3_lg") # Covariates
+
+    # Print results to the list
+  lm_var_mwf_3[var] <- list(lm(form,
+          data = all_data_clean))
+}
+
+## Printing models
+for (model in lm_var_mwf_3){
+  print(formula(model), showEnv = FALSE)
+  print(lm_results(model))
+  print(check_model(model))
+}
+```
+
+# Results
+
+## Model summaries
+
+```{r }
+## Unadjusted
+all_models_unadjusted_var = tibble()
+
+for (model in lm_var_mwf_1){
+  output <- rbind(tidy(model, conf.int = TRUE, conf.level = 0.95))[2,]
+  output$outcome <-  as.character(model$terms[[2]]) 
+  all_models_unadjusted_var <- rbind(all_models_unadjusted_var,output)
+}
+
+## Printing estimates
+all_models_unadjusted_var %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+
+```
+
+```{r}
+## Adjusted
+all_models_adjusted_var = tibble()
+
+for (model in lm_var_mwf_2){
+  output <- rbind(tidy(model, conf.int = TRUE, conf.level = 0.95))[2,]
+  output$outcome <-  as.character(model$terms[[2]]) 
+  all_models_adjusted_var <- rbind(all_models_adjusted_var,output)
+}
+
+## Printing estimates
+all_models_adjusted_var %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+```
+
+```{r}
+## Adjusted for WMH
+all_models_adjusted_var_wmh = tibble()
+
+for (model in lm_var_mwf_3){
+  output <- rbind(tidy(model, conf.int = TRUE, conf.level = 0.95))[2,]
+  output$outcome <-  as.character(model$terms[[2]]) 
+  all_models_adjusted_var_wmh <- rbind(all_models_adjusted_var_wmh,output)
+}
+
+## Printing estimates
+all_models_adjusted_var_wmh %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+```
+
+## Figures
+
+### Gait and MWF
+
+```{r, }
+# Cingulum
+ggplot(all_data_clean,aes(Cingulum_mean, cycle_time_cov_ST_lg)) +
+  geom_point(size = 3, colour = "turquoise2") +
+  ggtitle("Cingulum") +
+  geom_smooth(method = lm, se = TRUE, colour = "black", fill = "light blue") +
+  xlab(NULL) +
+  ylab("Cycle time variability (CoV%), \n log-transformed") + 
+  scale_x_continuous(breaks = seq(0.00, 0.15, by = 0.02), limits = c(0.00, 0.13)) +
+  scale_y_continuous(breaks = seq(0.00, 2.6, by = 0.2), limits = c(0, 2.6)) +
+  theme_dark() +
+  theme(plot.background = element_rect(fill = "black", colour = NA),
+        panel.background = element_rect(fill = "black"),
+        panel.grid.major = element_line(colour = "grey20"),
+        panel.grid.minor = element_line(colour = "grey20"),
+        plot.title = element_text(size = 17, hjust = 0.5, colour = "white"),
+        axis.line = element_blank(),
+        axis.title.y = element_text (size = 17, colour = "white"),
+        axis.title.x = element_text (size = 17, colour = "white"),
+        axis.text = element_text(colour = "white", size = 15))
+ggsave("plots/Cingulum_gait.png", width = 7, height = 5)
+```
+
+```{r, }
+# Superior longitudinal fasciculus
+ggplot(all_data_clean,aes(SLF_mean, cycle_time_cov_ST_lg)) +
+  geom_point(size = 3, colour = "turquoise2") +
+  ggtitle("Superior longitudinal fasciculus") +
+  geom_smooth(method = lm, se = TRUE, colour = "black", fill = "light blue") +
+  xlab(NULL) +
+  ylab("Cycle time variability (CoV%), \n log-transformed") + 
+  scale_x_continuous(breaks = seq(0.00, 0.21, by = 0.02), limits = c(0.07, 0.21)) +
+  scale_y_continuous(breaks = seq(0.00, 2.6, by = 0.2), limits = c(0, 2.6)) +
+  theme_dark() +
+  theme(plot.background = element_rect(fill = "black", colour = NA),
+        panel.background = element_rect(fill = "black"),
+        panel.grid.major = element_line(colour = "grey20"),
+        panel.grid.minor = element_line(colour = "grey20"),
+        plot.title = element_text(size = 17, hjust = 0.5, colour = "white"),
+        axis.line = element_blank(),
+        axis.title.y = element_text (size = 17, colour = "white"),
+        axis.title.x = element_text (size = 17, colour = "white"),
+        axis.text = element_text(colour = "white", size = 15))
+ggsave("plots/SLF_gait.png", width = 7, height = 5)
+```
+
+```{r, }
+# Posterior corona radiata
+ggplot(all_data_clean,aes(Post_CR_mean, cycle_time_cov_ST_lg)) +
+  geom_point(size = 3, colour = "turquoise2") +
+  ggtitle("Corona radiata, posterior") +
+  geom_smooth(method = lm, se = TRUE, colour = "black", fill = "light blue") +
+  xlab(NULL) +
+  ylab("Cycle time variability (CoV%), \n log-transformed") + 
+  scale_x_continuous(breaks = seq(0.00, 0.20, by = 0.02), limits = c(0.07, 0.20)) +
+  scale_y_continuous(breaks = seq(0.00, 2.6, by = 0.2), limits = c(0, 2.6)) +
+  theme_dark() +
+  theme(plot.background = element_rect(fill = "black", colour = NA),
+        panel.background = element_rect(fill = "black"),
+        panel.grid.major = element_line(colour = "grey20"),
+        panel.grid.minor = element_line(colour = "grey20"),
+        plot.title = element_text(size = 17, hjust = 0.5, colour = "white"),
+        axis.line = element_blank(),
+        axis.title.y = element_text (size = 17, colour = "white"),
+        axis.title.x = element_text (size = 17, colour = "white"),
+        axis.text = element_text(colour = "white", size = 15))
+ggsave("plots/PostCR_gait.png", width = 7, height = 5)
+```
+
+```{r, }
+# Corpus callosum, body
+ggplot(all_data_clean,aes(BCC_mean, cycle_time_cov_ST_lg)) +
+  geom_point(size = 3, colour = "turquoise2") +
+  ggtitle("Corpus callosum, body") +
+  geom_smooth(method = lm, se = TRUE, colour = "black", fill = "light blue") +
+  xlab(NULL) +
+  ylab("Cycle time variability (CoV%), \n log-transformed") + 
+  scale_x_continuous(breaks = seq(0.00, 0.20, by = 0.02), limits = c(0.07, 0.20)) +
+  scale_y_continuous(breaks = seq(0.00, 2.6, by = 0.2), limits = c(0, 2.6)) +
+  theme_dark() +
+  theme(plot.background = element_rect(fill = "black", colour = NA),
+        panel.background = element_rect(fill = "black"),
+        panel.grid.major = element_line(colour = "grey20"),
+        panel.grid.minor = element_line(colour = "grey20"),
+        plot.title = element_text(size = 17, hjust = 0.5, colour = "white"),
+        axis.line = element_blank(),
+        axis.title.y = element_text (size = 17, colour = "white"),
+        axis.title.x = element_text (size = 17, colour = "white"),
+        axis.text = element_text(colour = "white", size = 15))
+ggsave("plots/BCC_gait.png", width = 7, height = 5)
+```
+
+\newpage
+
+#### WMH plots
+
+```{r }
+### Cingulum
+ggplot(all_data_clean, aes(cycle_time_cov_ST_lg, wmh_cm3_lg)) +
+  geom_point(aes(col = Cingulum_mean), size = 3) +
+  geom_smooth(method = lm, se = TRUE, colour = "black") +
+  scale_colour_gradient(low = "yellow", high = "red") + 
+  ggtitle(" ") +
+  labs(color = "Cingulum,\nMyelin water fraction") +
+  ylab("White matter hyperintensity,\nlog-transformed") +
+  xlab(" ") +
+  theme_light() +
+  theme(plot.title = element_text(size = 17, hjust = 0.5),
+        legend.position = c(0.80, 0.1),
+        legend.direction = "horizontal",
+        legend.title = element_text(),
+        legend.background = element_blank(),
+        axis.title.y = element_text (size = 15),
+        axis.title.x = element_text (size = 15),
+        axis.text = element_text(colour = "black", size = 13)) +
+  guides(colour = guide_colourbar(title.position="top", title.hjust = 0.5, barwidth = 10))
+ggsave("plots/Cingulum_wmh.png", width = 7, height = 5)
+
+### SLF
+ggplot(all_data_clean, aes(cycle_time_cov_ST_lg, wmh_cm3_lg)) +
+  geom_point(aes(col = SLF_mean), size = 3) +
+  geom_smooth(method = lm, se = TRUE, colour = "black") +
+  scale_colour_gradient(low = "yellow", high = "red")+
+  ggtitle(" ") +
+  labs(color = "SLF,\nMyelin water fraction") +
+  ylab("White matter hyperintensity,\nlog-transformed") +
+  xlab(" ") +
+  theme_light() +
+  theme(plot.title = element_text(size = 17, hjust = 0.5),
+        legend.position = c(0.80, 0.1),
+        legend.direction = "horizontal",
+        legend.title = element_text(),
+        legend.background = element_blank(),
+        axis.title.y = element_text (size = 15),
+        axis.title.x = element_text (size = 15),
+        axis.text = element_text(colour = "black", size = 13)) +
+  guides(colour = guide_colourbar(title.position="top", title.hjust = 0.5, barwidth = 10))
+ggsave("plots/SLF_wmh.png", width = 7, height = 5)
+
+### Posterior corona radiata
+ggplot(all_data_clean, aes(cycle_time_cov_ST_lg, wmh_cm3_lg)) +
+  geom_point(aes(col = Post_CR_mean), size = 3) +
+  geom_smooth(method = lm, se = TRUE, colour = "black") +
+  scale_colour_gradient(low = "yellow", high = "red")+
+  ggtitle(" ") +
+  labs(color = "Corona radiata, posterior,\nMyelin water fraction") +
+  ylab("White matter hyperintensity,\nlog-transformed") +
+  xlab(" ") +
+  theme_light() +
+  theme(plot.title = element_text(size = 17, hjust = 0.5),
+        legend.position = c(0.80, 0.1),
+        legend.direction = "horizontal",
+        legend.title = element_text(),
+        legend.background = element_blank(),
+        axis.title.y = element_text (size = 15),
+        axis.title.x = element_text (size = 15),
+        axis.text = element_text(colour = "black", size = 13)) +
+  guides(colour = guide_colourbar(title.position="top", title.hjust = 0.5, barwidth = 10))
+ggsave("plots/PostCR_wmh.png", width = 7, height = 5)
+
+### Corpus callosum, body
+ggplot(all_data_clean, aes(cycle_time_cov_ST_lg, wmh_cm3_lg)) +
+  geom_point(aes(col = BCC_mean), size = 3) +
+  geom_smooth(method = lm, se = TRUE, colour = "black") +
+  scale_colour_gradient(low = "yellow", high = "red")+
+  ggtitle(" ") +
+  labs(color = "Corpus callosum, body,\nMyelin water fraction") +
+  ylab("White matter hyperintensity,\nlog-transformed") +
+  xlab("Cycle time variability (CoV%), log-transformed") +
+  theme_light() +
+  theme(plot.title = element_text(size = 17, hjust = 0.5),
+        legend.position = c(0.80, 0.1),
+        legend.direction = "horizontal",
+        legend.title = element_text(),
+        legend.background = element_blank(),
+        axis.title.y = element_text (size = 15),
+        axis.title.x = element_text (size = 15),
+        axis.text = element_text(colour = "black", size = 13)) +
+  guides(colour = guide_colourbar(title.position="top", title.hjust = 0.5, barwidth = 10))
+ggsave("plots/BCC_wmh.png", width = 7, height = 5)
+
+```
+
+\newpage
+
+# Models for other gait variables
+
+## Gait velocity
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Select variable names for models
+predictor_var <- colnames(all_data_clean[41:58])
+predictor_var %>% kable(col.names = "Predictor variables")
+
+# List to store models
+lm_vel_mwf_2 = list()
+
+# Run models in loop script
+for (var in predictor_var){
+  
+  # Formula
+  form <- paste(
+    "velocity_ST", "~", var, 
+    "+ age + eicv_cm3 + sex + bmi + mmse") # Covariates
+
+  # Print results to the list
+  lm_vel_mwf_2[var] <- list(lm(form,
+          data = all_data_clean))
+}
+
+```
+
+### Models
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Printing models
+for (model in lm_vel_mwf_2){
+  print(formula(model), showEnv = FALSE)
+  print(lm_results(model))
+}
+```
+
+### Results
+
+```{r }
+## Printing estimates
+## Adjusted
+all_models_adjusted_vel = tibble()
+
+for (model in lm_vel_mwf_2){
+  output <- rbind(tidy(model, conf.int = TRUE, conf.level = 0.95))[2,]
+  output$outcome <-  as.character(model$terms[[2]]) 
+  all_models_adjusted_vel <- rbind(all_models_adjusted_vel,output)
+}
+
+## Printing estimates
+all_models_adjusted_vel %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+
+```
+
+## Step length
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Select variable names for models
+predictor_var <- colnames(all_data_clean[41:58])
+predictor_var %>% kable(col.names = "Predictor variables")
+
+# List to store models
+lm_step_mwf_2 = list()
+
+# Run models in loop script
+for (var in predictor_var){
+  
+  # Formula
+  form <- paste(
+    "step_length_avg_ST", "~", var, 
+    "+ age + eicv_cm3 + sex + bmi + mmse") # Covariates
+
+  # Print results to the list
+  lm_step_mwf_2[var] <- list(lm(form,
+          data = all_data_clean))
+}
+
+```
+
+### Models
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Printing models
+for (model in lm_step_mwf_2){
+  print(formula(model), showEnv = FALSE)
+  print(lm_results(model))
+}
+```
+
+### Results
+
+```{r }
+## Printing estimates
+## Adjusted
+all_models_adjusted_step = tibble()
+
+for (model in lm_step_mwf_2){
+  output <- rbind(tidy(model, conf.int = TRUE, conf.level = 0.95))[2,]
+  output$outcome <-  as.character(model$terms[[2]]) 
+  all_models_adjusted_step <- rbind(all_models_adjusted_step, output)
+}
+
+## Printing estimates
+all_models_adjusted_step %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+```
+
+# Multiple comparisons
+
+```{r}
+## Computing FDR
+all_models_fdr <- rbind(
+  (all_models_adjusted_var %>% 
+  mutate(outcome = "variability")),
+
+(all_models_adjusted_vel %>% 
+  mutate(outcome = "velocity")),
+
+(all_models_adjusted_step %>% 
+  mutate(outcome = "step")))
+
+## Adjusting for FDR (assuming 3 tests per predictor)
+## Using FDR at alpha = 0.05
+all_models_fdr %>% 
+  mutate(p.fdr = p.adjust(p.value, method = "fdr")) %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+
+write.csv(all_models_fdr, "all_models_fdr.csv")
+```
+
+# WMH as predictor
+
+## Gait variables
+
+```{r }
+
+all_data_clean <- all_data_clean %>% # centering variables to plot estimates
+  mutate(velocity_ST_c = scale(velocity_ST),
+         step_length_avg_ST_c = scale(step_length_avg_ST),
+         cycle_time_cov_ST_lg_c = scale(cycle_time_cov_ST_lg))
+
+wmh_gait_lm <- list(
+  lm(velocity_ST_c ~ wmh_cm3_lg,
+          data = all_data_clean),
+  
+  lm(step_length_avg_ST_c ~ wmh_cm3_lg,
+          data = all_data_clean),
+  
+  lm(cycle_time_cov_ST_lg_c ~ wmh_cm3_lg,
+          data = all_data_clean))
+
+```
+
+### Models
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+## Printing models
+for (model in wmh_gait_lm){
+  print(formula(model), showEnv = FALSE)
+  print(lm_results(model))
+}
+```
+
+### Results
+
+```{r }
+## Adjusted
+wmh_gait_lm_estimates = tibble()
+
+for (model in wmh_gait_lm){
+  output <- rbind(tidy(model, conf.int = TRUE, conf.level = 0.95,))[2,]
+  output$rsquared <- summary(model)$r.squared
+  output$outcome <-  as.character(model$terms[[2]]) 
+  wmh_gait_lm_estimates <- rbind(wmh_gait_lm_estimates, output)
+}
+
+## Printing estimates
+wmh_gait_lm_estimates %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+```
+
+## MWF variables
+
+```{r }
+## Select variable names for models
+outcome_var <- colnames(all_data_clean[c(41:58,136)])
+outcome_var %>% kable(col.names = "Outcome variables")
+
+# List to store models
+wmh_mwf_lm = list()
+  
+# Run models in loop script
+for (var in outcome_var){
+  # Formula
+  form <- paste(var, "~ wmh_cm3_lg")
+  
+  # Print results to the list
+  wmh_mwf_lm[var] <- list(lm(form,
+          data = all_data_clean))
+}
+
+```
+
+### Models
+
+```{r, fig.height = 14, fig.width = 10, fig.align="center" }
+  ## Printing models
+for (model in wmh_mwf_lm){
+  print(formula(model), showEnv = FALSE)
+  print(lm_results(model))
+}
+```
+
+### Results
+
+```{r }
+## Printing estimates
+wmh_mwf_lm_estimates = tibble()
+
+for (model in wmh_mwf_lm){
+  output <- rbind(tidy(model, conf.int = TRUE, conf.level = 0.95))[2,]
+  output$rsquared <- summary(model)$r.squared
+  output$outcome <-  as.character(model$terms[[2]]) 
+  wmh_mwf_lm_estimates <- rbind(wmh_mwf_lm_estimates, output)
+}
+
+## Printing estimates
+wmh_mwf_lm_estimates %>% 
+  arrange(p.value) %>% 
+  kable(digits = 3)
+```
+
+### Plots
+
+```{r}
+wmh_gait_lm_estimates %>% 
+  mutate(p.value_sig = ifelse(p.value < 0.001, paste("p < ", 0.001),
+                       ifelse(p.value < 0.05,paste("p =",round(p.value, 3)),"")),
+    outcome = str_replace_all(outcome, c(
+    "velocity_ST_c" = "Gait velocity",
+    "step_length_avg_ST_c" = "Step length",
+    "cycle_time_cov_ST_lg_c" = "Cycle time variability"))) %>%
+  ggplot(aes(x = reorder(outcome, p.value), estimate, colour = outcome)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, size = 0.2, colour = "black") +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 0, size = 0.2, linetype = "dashed") +
+  scale_y_continuous(labels = scales::number_format(accuracy = 0.1), limits = c(-0.8, 0.8), n.breaks = 9) +
+  coord_flip() +
+  xlab(NULL) +
+  ylab("Estimates (95% CI)") +
+  geom_text(aes(label = p.value_sig), colour = "black", size = 2.5, vjust = 2.25) +
+  theme_light() +
+  theme(legend.position = "none",
+        axis.text = element_text(colour = "black", size = 10),
+        axis.text.y = element_text(face="bold"),
+        axis.title = element_text(colour = "black", size = 10))
+ggsave("plots/estimates_gait_mwf.png", width = 5, height = 5)
+
+```
+
+```{r, fig.height = 8, fig.width = 8, fig.align="center" }
+wmh_mwf_lm_estimates %>% 
+  filter(outcome != "MWF_TOT_WM_mean") %>% 
+  mutate(p.value_sig = ifelse(p.value < 0.001, paste("p < ", 0.001),
+                       ifelse(p.value < 0.05,paste("p =",round(p.value, 3)),"")),
+    outcome = str_replace_all(outcome, c(
+    "Ant_CR_mean" = "Corona Radiata, anterior",
+    "Ant_IC_mean" = "Internal Capsule, anterior",
+    "BCC_mean" = "Corpus Callosum, body",
+    "Cingulum_mean" = "Cingulum",
+    "Ext_Cap_mean" = "External Capsule",
+    "Fornix_mean" = "Fornix",
+    "GCC_mean" = "Corpus Callosum, genu",
+    "MWF_TOT_WM_eroded_mean" = "Whole-brain white matter",
+    "Post_CR_mean" = "Corona Radiata, posterior",
+    "Sup_CR_mean" = "Corona Radiata, superior",
+    "Post_IC_mean" = "Internal Capsule, posterior",
+    "Post_TR_mean" = "Thalamic Radiation, posterior",
+    "Retro_IC_mean" = "Internal Capsule, retrolenticular",
+    "Sag_Strat_mean" = "Sagittal Stratum",
+    "SCC_mean" = "Corpus Callosum, splenium",
+    "SLF_mean" = "Superior Longitudinal Fasciculus",
+    "Frontal_WM_all_mean" = "Frontal white matter",
+    "Parietal_WM_all_mean" = "Parietal white matter"))) %>%
+  ggplot(aes(x = reorder(outcome, p.value), estimate, colour = outcome)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, size = 0.2, colour = "black") +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 0, size = 0.2, linetype = "dashed") +
+  scale_y_continuous(labels = scales::number_format(accuracy = 0.01), limits = c(-0.05, 0.05), n.breaks = 9) +
+  coord_flip() +
+  xlab(NULL) +
+  ylab("Estimates (95% CI)") +
+  geom_text(aes(label = p.value_sig), colour = "black", size = 2.5, vjust = 2.25) +
+  theme_light() +
+  theme(legend.position = "none",
+        axis.text = element_text(colour = "black", size = 10),
+        axis.text.y = element_text(face="bold"),
+        axis.title = element_text(colour = "black", size = 10))
+ggsave("plots/estimates_wmh_mwf.png", width = 8, height = 8)
+
+```
